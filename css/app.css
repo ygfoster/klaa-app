@@ -495,6 +495,9 @@ h1, h2, h3 { margin: 0; line-height: 1.3; }
 .dialog-message { white-space: pre-line; margin: 0 0 8px; }
 .dialog-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
 .dialog-actions .btn { flex: 1; }
+/* ボタンが3つのときは縦に並べる（スマホで文字が切れないように） */
+.dialog-actions:has(> .btn:nth-child(3)) { flex-direction: column-reverse; }
+.warn-list.same-day { font-size: 16px; color: var(--text); font-weight: 600; }
 .dialog.warning { border-top: 6px solid var(--danger); }
 .dialog.celebrate { border-top: 6px solid var(--gold); }
 .warn-list { margin: 8px 0; padding-left: 1.2em; font-size: 14px; color: var(--muted); }

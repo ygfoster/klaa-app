@@ -774,10 +774,10 @@ async function submitSkill(member, rule, date) {
  * 保存系の操作を送る。失敗したら「未送信」として端末に残し、同じ requestId で再送できるようにする。
  */
 async function sendMutation(op) {
-  pending.set(op);
+  pending.add(op);
   try {
     const data = await withBusy('保存中…', () => call(op.action, op.payload, { requestId: op.requestId }));
-    pending.clear();
+    pending.remove(op.requestId);
     drafts.clear(op.payload.memberId);
     applyMemberUpdate(data.member);
     closeSheet();
@@ -806,10 +806,36 @@ async function sendMutation(op) {
       renderPendingBanner();
       return null;
     }
-    pending.clear();
+    pending.remove(op.requestId);
+    if (err.code === 'SAME_DAY_EXISTS') {
+      const choice = await askSameDay(op, err);
+      if (!choice) return null; // キャンセル：入力画面と下書きはそのまま
+      op.payload = Object.assign({}, op.payload, { sameDay: choice });
+      return sendMutation(op);
+    }
     await alertDialog('保存できませんでした', err.message, 'warning');
     return null;
   }
+}
+
+/**
+ * 同じ日に記録があるときの確認。振替で1日に2回受けることがあるので、追加か置き換えかを選んでもらう
+ * @return {Promise<'add'|'replace'|false>}
+ */
+function askSameDay(op, err) {
+  const existing = (err.response && err.response.details && err.response.details.existing) || [];
+  return dialog({
+    title: `${op.memberName}：この日はすでに記録があります`,
+    html: `
+      <ul class="warn-list same-day">${existing.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
+      <p class="dialog-message small muted">振替などで同じ日に2回レッスンを受けた場合は「2回目として追加」。
+入力の間違いを直す場合は「置き換える」を選んでください。</p>`,
+    buttons: [
+      { label: 'キャンセル', value: false },
+      { label: '置き換える', value: 'replace' },
+      { label: '2回目として追加', value: 'add', style: 'primary' },
+    ],
+  });
 }
 
 function applyMemberUpdate(updated) {
@@ -861,11 +887,11 @@ async function runUndo() {
 function renderPendingBanner() {
   const box = document.getElementById('pending-banner');
   if (!box) return;
-  const p = pending.get();
-  if (!p) { box.innerHTML = ''; return; }
+  const list = pending.list();
+  if (!list.length) { box.innerHTML = ''; return; }
   box.innerHTML = `
     <div class="banner warning">
-      <span>未送信の入力があります：<strong>${esc(p.label)}</strong></span>
+      <span>未送信の入力が${list.length}件あります：<strong>${esc(list.map((p) => p.label).join('、'))}</strong></span>
       <span class="banner-actions">
         <button type="button" class="btn small" data-discard>破棄</button>
         <button type="button" class="btn small primary" data-resend>再送信</button>
@@ -873,11 +899,16 @@ function renderPendingBanner() {
     </div>`;
   box.querySelector('[data-resend]').addEventListener('click', async () => {
     box.innerHTML = '';
-    await sendMutation(p);
+    // 古い順に1件ずつ送る。また通信に失敗して「あとで」を選んだら、そこで止める
+    for (const op of pending.list()) {
+      await sendMutation(op);
+      if (pending.list().some((p) => p.requestId === op.requestId)) break;
+    }
     renderPendingBanner();
   });
   box.querySelector('[data-discard]').addEventListener('click', async () => {
-    if (await confirmDialog('未送信の入力を破棄しますか？', p.label, '破棄する', true)) { pending.clear(); renderPendingBanner(); }
+    const labels = pending.list().map((p) => p.label).join('\n');
+    if (await confirmDialog(`未送信の入力${list.length}件を破棄しますか？`, labels, '破棄する', true)) { pending.clearAll(); renderPendingBanner(); }
   });
 }
 

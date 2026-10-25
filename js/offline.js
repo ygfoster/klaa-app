@@ -3,7 +3,8 @@
  *
  *   drafts  … 会員ごとの入力途中の内容（点数・ステータス・入力種別・日付）。入力のたびに保存し、
  *              画面を開き直しても続きから入力できる。保存に成功したら消す。
- *   pending … 送信に失敗した操作（requestId 付き）。同じ requestId で再送するので、二重登録にならない。
+ *   pending … 送信に失敗した操作（requestId 付き）の一覧。同じ requestId で再送するので、二重登録にならない。
+ *              電波が悪いときに続けて失敗しても、すべて残す（以前は最後の1件だけだった）。
  */
 import { local } from './config.js';
 
@@ -24,13 +25,20 @@ export const drafts = {
 };
 
 export const pending = {
-  get() {
-    return local.get('pending', null);
+  list() {
+    const v = local.get('pending', null);
+    if (Array.isArray(v)) return v;
+    return v && v.requestId ? [v] : []; // 以前の形式（1件だけ）
   },
-  set(item) {
-    local.set('pending', Object.assign({}, item, { at: Date.now() }));
+  add(item) {
+    const rest = this.list().filter((p) => p.requestId !== item.requestId);
+    local.set('pending', rest.concat([Object.assign({}, item, { at: Date.now() })]));
   },
-  clear() {
+  remove(requestId) {
+    const rest = this.list().filter((p) => p.requestId !== requestId);
+    if (rest.length) local.set('pending', rest); else local.remove('pending');
+  },
+  clearAll() {
     local.remove('pending');
   },
 };
