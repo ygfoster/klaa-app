@@ -4,7 +4,7 @@
  *   初回設定（接続先URL） → PIN入力 → 会員一覧（クラスで絞り込み） → 会員の入力シート
  *   スタッフ編集モードでは、入力シートの代わりに過去の記録の一覧・修正画面を開く。
  */
-import { APP_VERSION, getApiUrl, setApiUrl, isValidApiUrl, takeApiUrlFromHash, getDeviceId, randomId, todayYmd } from './config.js';
+import { APP_VERSION, getApiUrl, setApiUrl, isValidApiUrl, takeApiUrlFromHash, getDeviceId, randomId, todayYmd, local } from './config.js';
 import { call, hooks, ApiError, NETWORK_MESSAGE } from './api.js';
 import * as sessionTimer from './session.js';
 import { drafts, pending } from './offline.js';
@@ -17,6 +17,9 @@ const state = {
   classes: [],
   rules: [],
   targets: [],
+  locations: [],
+  location: '',        // この端末で使う教室（春日井／あま）。端末に記憶する
+  suggestedClasses: {},
   basicTarget: '80cm的',
   scoreConfig: null,
   lastSync: null,
@@ -218,7 +221,11 @@ async function startMain() {
     state.basicTarget = data.basicTarget || state.basicTarget;
     state.scoreConfig = data.scoreConfig;
     state.lastSync = data.lastSync;
-    state.filter.className = data.suggestedClass || 'all';
+    state.locations = data.locations || [];
+    state.suggestedClasses = data.suggestedClasses || {};
+    const saved = local.get('location', '');
+    state.location = state.locations.indexOf(saved) >= 0 ? saved : (state.locations[0] || '');
+    state.filter.className = state.suggestedClasses[state.location] || data.suggestedClass || 'all';
     renderMain();
     offerPendingResend();
   } catch (err) {
@@ -253,7 +260,7 @@ function renderMain() {
         <button class="icon-btn" id="btn-sync" title="名簿を今すぐ同期する"><span aria-hidden="true">🔄</span><span class="label">名簿を同期</span></button>
         <label class="icon-btn" title="CSVファイルから取り込む">
           <span aria-hidden="true">📄</span><span class="label">CSV取込</span>
-          <input type="file" id="csv-input" accept=".csv,text/csv,text/plain" hidden>
+          <input type="file" id="csv-input" accept=".csv,text/csv,text/plain" multiple hidden>
         </label>
         <button class="icon-btn ${state.editMode ? 'active' : ''}" id="btn-edit" title="スタッフ編集モード"><span aria-hidden="true">✏️</span><span class="label">${state.editMode ? '編集を終了' : '編集モード'}</span></button>
         <button class="icon-btn" id="btn-lock" title="ロック"><span aria-hidden="true">🔒</span><span class="label">ロック</span></button>
@@ -261,6 +268,9 @@ function renderMain() {
     </header>
     <div id="pending-banner"></div>
     <nav class="filters">
+      ${state.locations.length > 1 ? `<div class="segmented locations" role="radiogroup" aria-label="教室">
+        ${state.locations.map((l) => `<button type="button" role="radio" data-location="${esc(l)}" aria-checked="${l === state.location}">${esc(l)}</button>`).join('')}
+      </div>` : ''}
       <div class="chips" id="class-chips" role="tablist" aria-label="クラス">${renderChips()}</div>
       <label class="search">
         <span aria-hidden="true">🔍</span>
@@ -272,6 +282,16 @@ function renderMain() {
     <div id="undo-bar"></div>
     <footer class="version">v${APP_VERSION}</footer>`;
 
+  const locationSwitch = document.querySelector('.segmented.locations');
+  if (locationSwitch) locationSwitch.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-location]');
+    if (!b || b.dataset.location === state.location) return;
+    state.location = b.dataset.location;
+    local.set('location', state.location);
+    state.filter.className = state.suggestedClasses[state.location] || 'all';
+    locationSwitch.querySelectorAll('[data-location]').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.location === state.location)));
+    refreshList();
+  });
   document.getElementById('class-chips').addEventListener('click', (e) => {
     const chip = e.target.closest('[data-class]');
     if (!chip) return;
@@ -318,7 +338,8 @@ function renderChips() {
     </button>`;
   return [
     chip('all', '全員', state.members.length + '名'),
-    ...state.classes.map((c) => chip(c.name, `${c.dayLabel} ${c.start}`, (counts[c.name] || 0) + '名', c.day === today ? 'today' : '')),
+    ...state.classes.filter((c) => !state.location || c.location === state.location)
+      .map((c) => chip(c.name, `${c.dayLabel} ${c.start}`, (counts[c.name] || 0) + '名' + (c.kind && c.kind !== 'ベーシック' ? '・' + c.kind : ''), c.day === today ? 'today' : '')),
     counts['(none)'] ? chip('(none)', 'クラス未設定', counts['(none)'] + '名') : '',
   ].join('');
 }
@@ -808,13 +829,15 @@ async function runRosterSync(payload) {
 }
 
 async function onCsvSelected(e) {
-  const file = e.target.files[0];
+  const list = Array.from(e.target.files || []);
   e.target.value = '';
-  if (!file) return;
-  if (!(await confirmDialog('名簿を取り込みますか？', `${file.name}\nSCOLAから出力した会員名簿で、会員マスタを更新します。`, '取り込む'))) return;
+  if (!list.length) return;
+  const names = list.map((f) => f.name).join('\n');
+  const note = list.length > 1 ? '\n（複数のファイルは生徒番号で1つにまとめて取り込みます）' : '\n（SCOLAの「基本」と「受講」の2つを同時に選ぶと、生年月日とクラスの両方が入ります）';
+  if (!(await confirmDialog('名簿を取り込みますか？', `${names}${note}`, '取り込む'))) return;
   try {
-    const base64 = await readAsBase64(file);
-    const result = await withBusy('取り込み中…', () => call('roster.importCsv', { fileBase64: base64, fileName: file.name }, { timeoutMs: 120000 }));
+    const files = await Promise.all(list.map(async (f) => ({ fileBase64: await readAsBase64(f), fileName: f.name })));
+    const result = await withBusy('取り込み中…', () => call('roster.importCsv', { files }, { timeoutMs: 120000 }));
     await afterRosterResult(result);
   } catch (err) {
     await handleRosterError(err, () => runRosterSync({ force: true }));

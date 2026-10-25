@@ -197,6 +197,9 @@ h1, h2, h3 { margin: 0; line-height: 1.3; }
   backdrop-filter: saturate(180%) blur(16px);
   border-bottom: 1px solid var(--line);
 }
+.segmented.locations { flex: none; grid-template-columns: repeat(2, minmax(64px, 1fr)); }
+.segmented.locations button { min-height: 44px; padding: 0 10px; }
+.segmented.locations button[aria-checked="true"] { background: var(--navy); color: #fff; }
 .chips { display: flex; gap: 8px; overflow-x: auto; flex: 1; scrollbar-width: none; padding: 2px; scroll-snap-type: x proximity; }
 .chips::-webkit-scrollbar { display: none; }
 .chip {
