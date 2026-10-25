@@ -162,40 +162,76 @@ const EVENT_ICONS = {
 };
 
 /**
- * サーバーから届いた events を、お祝い → お知らせ → 警告 の順に1枚のカードで見せる。
+ * サーバーから届いた events を1枚のカードで見せる。
+ *   自己ベスト … 点数をスコアボードのように大きく表示（前回との差も）
+ *   進級       … 「3級 → 4級」
+ *   お知らせ・警告 … 左に細い色の線を付けた行
  * 警告（降格・装備を戻す）があるときは「確認しました」を押すまで閉じない。
  */
 export function showEvents(events, memberName) {
   if (!events || !events.length) return Promise.resolve();
-  const celebrate = events.filter((e) => e.level === 'celebrate');
+  const pb = events.find((e) => e.kind === 'pb' || e.kind === 'pbTie');
+  const promotion = events.find((e) => e.kind === 'promotion');
+  const notes = events.filter((e) => e !== pb && e !== promotion);
   const warnings = events.filter((e) => e.level === 'warning');
-  const infos = events.filter((e) => e.level === 'info');
-  const ordered = celebrate.concat(infos, warnings);
+  // 警告を最後に
+  notes.sort((a, b) => (a.level === 'warning') - (b.level === 'warning'));
 
-  const html = `
-    <ul class="event-list">
-      ${ordered.map((e) => `
-        <li class="event ${esc(e.level)} ${esc(e.kind)}">
-          <span class="event-icon">${icon(EVENT_ICONS[e.kind] || 'info')}</span>
-          <span class="event-text">${esc(e.message)}</span>
-        </li>`).join('')}
-    </ul>`;
+  const hero = pb && typeof pb.score === 'number' ? `
+    <div class="pb-hero">
+      <p class="pb-hero-label">${pb.kind === 'pbTie' ? '自己ベスト タイ' : '自己ベスト更新'}${pb.target ? `<span>${esc(pb.target)}</span>` : ''}</p>
+      <p class="pb-hero-score"><span data-count="${esc(pb.score)}" data-from="${esc(pb.before === null || pb.before === undefined ? pb.score : pb.before)}">${esc(pb.score)}</span><small>点</small></p>
+      <p class="pb-hero-diff">${pb.kind === 'pbTie' || pb.before === null || pb.before === undefined
+        ? '前回の自己ベストと同点'
+        : `これまで ${esc(pb.before)}点<strong>+${esc(pb.score - pb.before)}</strong>`}</p>
+    </div>` : pb ? `<p class="pb-hero-label solo">${esc(pb.message)}</p>` : '';
 
-  if (celebrate.length) confetti();
-  return dialog({
+  const promo = promotion ? `
+    <div class="promo-row">
+      <span class="promo-label">進級</span>
+      <span class="promo-value">${promotion.from ? `<span class="promo-from">${esc(promotion.from)}</span>${icon('arrow', 'promo-arrow')}` : ''}<strong>${esc(promotion.to || promotion.message)}</strong></span>
+      ${/飛び級/.test(promotion.message) ? `<small class="promo-note">${esc(promotion.message.replace(/^.*?（/, '（'))}</small>` : ''}
+    </div>` : '';
+
+  const list = notes.length ? `
+    <ul class="note-list">
+      ${notes.map((e) => `<li class="note ${esc(e.level)}">${icon(EVENT_ICONS[e.kind] || 'info')}<span>${esc(e.message)}</span></li>`).join('')}
+    </ul>` : '';
+
+  const celebrate = !!(pb || promotion);
+  if (celebrate) confetti();
+  const done = dialog({
     title: memberName,
-    html,
-    tone: warnings.length ? 'warning' : celebrate.length ? 'celebrate' : '',
+    html: `<div class="event-card">${hero}${promo}${list}</div>`,
+    tone: warnings.length ? 'warning' : celebrate ? 'celebrate' : '',
     buttons: [{ label: warnings.length ? '確認しました' : 'OK', value: true, style: 'primary' }],
   });
+  countUp(root().querySelector('.dialog:last-of-type [data-count]') || document.querySelector('[data-count]'));
+  return done;
+}
+
+/** 点数を前回の自己ベストから数え上げる（動きを減らす設定では何もしない） */
+function countUp(el) {
+  if (!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const to = Number(el.dataset.count);
+  const from = Number(el.dataset.from);
+  if (!(to > from)) return;
+  const start = performance.now();
+  const ms = 700;
+  const step = (t) => {
+    const k = Math.min(1, (t - start) / ms);
+    el.textContent = String(Math.round(from + (to - from) * (1 - Math.pow(1 - k, 3))));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 /** 紙吹雪（動きを減らす設定の端末では表示しない） */
 export function confetti() {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const colors = ['#facc28', '#de3834', '#2884d6', '#f5f5f0', '#34c759'];
+  const colors = ['#e60013', '#102a43', '#e8b500', '#c9d6e3'];
   const layer = h('<div class="confetti" aria-hidden="true"></div>');
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 40; i++) {
     const p = document.createElement('i');
     p.style.left = Math.random() * 100 + 'vw';
     p.style.background = colors[i % colors.length];

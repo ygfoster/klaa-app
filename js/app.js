@@ -420,9 +420,9 @@ function renderMembers() {
       <span class="member-name">${esc(m.name)}</span>
       <span class="member-kana">${esc(m.kana)}</span>
       <span class="member-tags">
-        ${m.advance ? '<span class="tag advance">アドバンス</span>' : `<span class="tag grade">${esc(m.gradeLabel || m.grade || '—')}</span>`}
-        ${m.distance ? `<span class="tag">${esc(m.distance)}</span>` : ''}
-        ${m.centerRod === 'あり' ? '<span class="tag rod">ロッド</span>' : ''}
+        ${courseTagHtml(m)}
+        ${m.distance && !m.kids ? `<span class="tag">${esc(m.distance)}</span>` : ''}
+        ${m.centerRod === 'あり' && !m.kids ? '<span class="tag rod">ロッド</span>' : ''}
       </span>
       ${pbListHtml(m.personalBests, 'member-pbs')}
       ${state.filter.className === 'all' && m.className ? `<span class="member-class">${esc(classDisplay(m.className))}</span>` : ''}
@@ -457,7 +457,7 @@ async function chooseClass(member) {
 }
 
 function nextGoalText(member) {
-  if (member.advance) return '';
+  if (member.advance || member.kids) return ''; // 級がない（自己ベストだけを記録する）
   const current = parseInt(member.grade, 10);
   const rule = state.rules.find((r) => r.grade === (isNaN(current) ? 0 : current) + 1);
   if (!rule) return '15級合格 ── アドバンスコース推薦状の対象です';
@@ -466,6 +466,13 @@ function nextGoalText(member) {
   if (rule.min !== null) return `次：${rule.label}　${where}・${rule.distance}・${rule.min}点以上`;
   const own = member.ageCategory === '子供' ? `（この会員：18歳以下 ${rule.minChild}点）` : member.ageCategory === '大人' ? `（この会員：19歳以上 ${rule.minAdult}点）` : '';
   return `次：${rule.label}　${where}・${rule.distance}・19歳以上 ${rule.minAdult}点／18歳以下 ${rule.minChild}点${own}`;
+}
+
+/** コース・級のタグ（アドバンス・キッズは級を持たない） */
+function courseTagHtml(m, size = '') {
+  if (m.advance) return '<span class="tag advance">アドバンス</span>';
+  if (m.kids) return '<span class="tag kids">キッズ</span>';
+  return `<span class="tag grade ${size}">${esc(m.gradeLabel || m.grade || '—')}</span>`;
 }
 
 function memberSummaryHtml(member) {
@@ -486,9 +493,9 @@ function memberSummaryHtml(member) {
       </div>
     </div>
     <div class="status-row">
-      ${member.advance ? '<span class="tag advance">アドバンス</span>' : `<span class="tag grade large">${esc(member.gradeLabel || member.grade)}</span>`}
-      ${member.distance ? `<span class="tag">${esc(member.distance)}</span>` : ''}
-      ${member.centerRod ? `<span class="tag ${member.centerRod === 'あり' ? 'rod' : ''}">センターロッド${esc(member.centerRod)}</span>` : ''}
+      ${courseTagHtml(member, 'large')}
+      ${member.distance && !member.kids ? `<span class="tag">${esc(member.distance)}</span>` : ''}
+      ${member.centerRod && !member.kids ? `<span class="tag ${member.centerRod === 'あり' ? 'rod' : ''}">センターロッド${esc(member.centerRod)}</span>` : ''}
     </div>
     <div class="pb-panel">
       <span class="pb-title">自己ベスト</span>
@@ -581,7 +588,7 @@ function openMember(member, dir = 0) {
     target: member.advance ? (draft.target || member.lastTarget || '') : state.basicTarget,
   };
   const currentGrade = parseInt(member.grade, 10);
-  const nextRule = member.advance ? null : state.rules.find((r) => r.grade === (isNaN(currentGrade) ? 0 : currentGrade) + 1);
+  const nextRule = member.advance || member.kids ? null : state.rules.find((r) => r.grade === (isNaN(currentGrade) ? 0 : currentGrade) + 1);
 
   const el = h(`<div class="member-sheet">
     ${memberSummaryHtml(member)}
@@ -603,7 +610,7 @@ function openMember(member, dir = 0) {
       <span class="target-label">的</span>
       ${member.advance ? `<div class="segmented targets" role="radiogroup" aria-label="的の種類">
         ${state.targets.map((t) => `<button type="button" role="radio" data-target="${esc(t.key)}" aria-label="${esc(t.key)}"><span class="t-long">${esc(t.key)}</span><span class="t-short">${esc(t.short)}</span></button>`).join('')}
-      </div>` : `<span class="target-fixed">${esc(state.basicTarget)}<small>（ベーシック共通）</small></span>`}
+      </div>` : `<span class="target-fixed">${esc(state.basicTarget)}<small>（${member.kids ? 'キッズ' : 'ベーシック'}共通）</small></span>`}
     </div>
     <div class="draft-bar" data-draft-bar hidden>
       <span><strong>下書き</strong><span data-draft-text></span></span>
@@ -938,7 +945,7 @@ async function openHistory(member, dir = 0) {
     return;
   }
   const el = h(`<div class="member-sheet">
-    ${memberSummaryHtml(Object.assign({}, member, data.member, { kana: member.kana, advance: member.advance, ageCategory: member.ageCategory }))}
+    ${memberSummaryHtml(Object.assign({}, member, data.member, { kana: member.kana, advance: member.advance, kids: member.kids, ageCategory: member.ageCategory }))}
     <h3 class="section-title">記録（新しい順）</h3>
     ${data.records.length ? `<ul class="history">${data.records.map((r) => `
       <li><button type="button" class="history-row" data-record="${esc(r.recordId)}">
