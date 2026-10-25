@@ -8,7 +8,7 @@ import { APP_VERSION, getApiUrl, setApiUrl, isValidApiUrl, takeApiUrlFromHash, g
 import { call, hooks, ApiError, NETWORK_MESSAGE } from './api.js';
 import * as sessionTimer from './session.js';
 import { drafts, pending } from './offline.js';
-import { esc, h, dialog, alertDialog, confirmDialog, toast, withBusy, showEvents, openSheet } from './ui.js';
+import { esc, h, icon, dialog, alertDialog, confirmDialog, toast, withBusy, showEvents, openSheet, openDrawer, pickOption } from './ui.js';
 
 const app = () => document.getElementById('app');
 
@@ -75,6 +75,7 @@ function renderSetup(message) {
     <main class="center-screen">
       <div class="card setup-card">
         <img src="icons/icon-192.png" alt="" class="setup-icon">
+        <img src="img/klaa-logo.png" alt="KLAA" class="setup-logo">
         <h1>初回設定</h1>
         <p class="muted">管理者から受け取った「接続先URL」を入力してください。<br>（設定用のリンクから開いた場合は自動で入ります）</p>
         <form id="setup-form" class="stack">
@@ -109,14 +110,14 @@ function renderLock(message) {
   app().innerHTML = `
     <main class="center-screen lock-screen">
       <div class="lock-card">
-        <img src="icons/icon-192.png" alt="" class="lock-icon">
-        <h1>KLAA 進級管理</h1>
-        <p class="muted">スタッフ共通のPINを入力してください</p>
+        <div class="lock-brand"><img src="img/klaa-logo.png" alt="KLAA"></div>
+        <h1>進級・スコア管理</h1>
+        <p class="muted">スタッフ共通のPINを入力してください<br><small>6桁を入力すると自動でログインします</small></p>
         <div class="pin-dots" aria-label="入力済みの桁数">${'<i></i>'.repeat(6)}</div>
         <p class="error" id="pin-msg" role="alert">${esc(message || '')}</p>
         <div class="keypad" id="pin-pad">
           ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button type="button" data-k="${n}">${n}</button>`).join('')}
-          <button type="button" data-k="del" aria-label="1文字消す">⌫</button>
+          <button type="button" data-k="del" aria-label="1文字消す">${icon('backspace')}</button>
           <button type="button" data-k="0">0</button>
           <button type="button" data-k="ok" class="ok" aria-label="ログイン" disabled>OK</button>
         </div>
@@ -136,9 +137,12 @@ function renderLock(message) {
     else if (k === 'ok') return submit();
     else if (pin.length < 6) pin += k;
     render();
+    if (pin.length === 6) submit(); // 6桁そろったら自動でログイン（4〜5桁のPINは OK で送る）
   };
+  let sending = false;
   const submit = async () => {
-    if (pin.length < 4) return;
+    if (pin.length < 4 || sending) return;
+    sending = true;
     const entered = pin;
     pin = '';
     render();
@@ -153,6 +157,8 @@ function renderLock(message) {
       card.classList.remove('shake');
       void card.offsetWidth;
       card.classList.add('shake');
+    } finally {
+      sending = false;
     }
   };
 
@@ -249,71 +255,114 @@ function renderError(err) {
 }
 
 function renderMain() {
+  const multi = state.locations.length > 1;
   app().innerHTML = `
     <div class="sticky-head">
     <header class="topbar ${state.editMode ? 'editing' : ''}">
+      <div class="brand"><img src="img/klaa-logo.png" alt="KLAA"></div>
       <div class="topbar-title">
         <h1>${state.editMode ? 'スタッフ編集モード' : '進級・スコア管理'}</h1>
-        <p class="sync-info">最終名簿同期：<span id="last-sync">${esc(state.lastSync ? state.lastSync.display : '未同期')}</span></p>
+        <p class="sync-info">名簿：<span id="last-sync">${esc(state.lastSync ? state.lastSync.display : '未同期')}</span></p>
       </div>
       <div class="topbar-actions">
-        <button class="icon-btn" id="btn-sync" title="名簿を今すぐ同期する"><span aria-hidden="true">🔄</span><span class="label">名簿を同期</span></button>
-        <label class="icon-btn" title="CSVファイルから取り込む">
-          <span aria-hidden="true">📄</span><span class="label">CSV取込</span>
-          <input type="file" id="csv-input" accept=".csv,text/csv,text/plain" multiple hidden>
-        </label>
-        <button class="icon-btn ${state.editMode ? 'active' : ''}" id="btn-edit" title="スタッフ編集モード"><span aria-hidden="true">✏️</span><span class="label">${state.editMode ? '編集を終了' : '編集モード'}</span></button>
-        <button class="icon-btn" id="btn-lock" title="ロック"><span aria-hidden="true">🔒</span><span class="label">ロック</span></button>
+        ${state.editMode ? `<button type="button" class="pill-btn end-edit" id="btn-end-edit">編集を終了</button>` : ''}
+        ${multi ? `<button type="button" class="pill-btn location-pill" id="btn-location" aria-label="教室：${esc(state.location)}（タップで切り替え）">
+          ${icon('pin')}<span>${esc(state.location)}</span>${icon('swap', 'ic-sm')}</button>` : ''}
+        <button type="button" class="menu-btn" id="btn-menu" aria-label="メニュー" aria-haspopup="dialog">${icon('menu')}</button>
       </div>
     </header>
     <div id="pending-banner"></div>
     <nav class="filters">
-      ${state.locations.length > 1 ? `<div class="segmented locations" role="radiogroup" aria-label="教室">
-        ${state.locations.map((l) => `<button type="button" role="radio" data-location="${esc(l)}" aria-checked="${l === state.location}">${esc(l)}</button>`).join('')}
-      </div>` : ''}
-      <div class="chips" id="class-chips" role="tablist" aria-label="クラス">${renderChips()}</div>
       <label class="search">
-        <span aria-hidden="true">🔍</span>
-        <input id="search" type="search" placeholder="名前・ふりがなで探す" value="${esc(state.filter.query)}" autocomplete="off">
+        ${icon('search')}
+        <input id="search" type="search" placeholder="生徒の名前・ふりがなで検索" value="${esc(state.filter.query)}" autocomplete="off" enterkeyhint="search">
+        <button type="button" class="search-clear" id="search-clear" aria-label="検索をクリア" ${state.filter.query ? '' : 'hidden'}>${icon('close')}</button>
       </label>
+      <div class="chips" id="class-chips" role="tablist" aria-label="クラス">${renderChips()}</div>
     </nav>
     </div>
     <main class="members" id="members">${renderMembers()}</main>
     <div id="undo-bar"></div>
     <footer class="version">v${APP_VERSION}</footer>`;
 
-  const locationSwitch = document.querySelector('.segmented.locations');
-  if (locationSwitch) locationSwitch.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-location]');
-    if (!b || b.dataset.location === state.location) return;
-    state.location = b.dataset.location;
-    local.set('location', state.location);
-    state.filter.className = state.suggestedClasses[state.location] || 'all';
-    locationSwitch.querySelectorAll('[data-location]').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.location === state.location)));
-    refreshList();
-  });
+  const locationBtn = document.getElementById('btn-location');
+  if (locationBtn) locationBtn.addEventListener('click', () => switchLocation());
+  const endEdit = document.getElementById('btn-end-edit');
+  if (endEdit) endEdit.addEventListener('click', toggleEditMode);
   document.getElementById('class-chips').addEventListener('click', (e) => {
     const chip = e.target.closest('[data-class]');
     if (!chip) return;
     state.filter.className = chip.dataset.class;
     refreshList();
   });
-  document.getElementById('search').addEventListener('input', (e) => {
-    state.filter.query = e.target.value;
+  const search = document.getElementById('search');
+  const clearBtn = document.getElementById('search-clear');
+  search.addEventListener('input', () => {
+    state.filter.query = search.value;
+    clearBtn.hidden = !search.value;
     refreshList(false);
+  });
+  clearBtn.addEventListener('click', () => {
+    search.value = '';
+    state.filter.query = '';
+    clearBtn.hidden = true;
+    refreshList(false);
+    search.focus();
   });
   document.getElementById('members').addEventListener('click', (e) => {
     const card = e.target.closest('[data-member]');
     if (!card) return;
     const member = state.members.find((m) => m.memberId === card.dataset.member);
-    if (member) (state.editMode ? openHistory(member) : openMember(member));
+    if (!member) return;
+    state.navIds = visibleMembers().map((m) => m.memberId); // 横スワイプで移動する順番
+    state.editMode ? openHistory(member) : openMember(member);
   });
-  document.getElementById('btn-sync').addEventListener('click', () => runRosterSync({}));
-  document.getElementById('csv-input').addEventListener('change', onCsvSelected);
-  document.getElementById('btn-edit').addEventListener('click', toggleEditMode);
-  document.getElementById('btn-lock').addEventListener('click', logout);
+  document.getElementById('btn-menu').addEventListener('click', openMenu);
   renderUndo();
   scrollActiveChip();
+}
+
+/** 教室を切り替える（2教室なのでタップのたびに入れ替わる。端末に記憶） */
+function switchLocation(to) {
+  const next = to || state.locations[(state.locations.indexOf(state.location) + 1) % state.locations.length];
+  if (!next || next === state.location) return;
+  state.location = next;
+  local.set('location', next);
+  state.filter.className = state.suggestedClasses[next] || 'all';
+  renderMain();
+  toast(`${next}教室に切り替えました`);
+}
+
+/** 右上のメニュー */
+function openMenu() {
+  const other = state.locations.filter((l) => l !== state.location)[0];
+  const items = [
+    { id: 'sync', icon: 'sync', label: '名簿を今すぐ同期',
+      desc: '取り込み済みの名簿を会員一覧に反映します。毎晩自動で同期されるため、通常は使う必要はありません。' },
+    { id: 'csv', icon: 'upload', label: 'SCOLAの名簿CSVを取り込む', file: '.csv,text/csv,text/plain',
+      desc: 'SCOLAからダウンロードしたCSVを選びます。「基本」と「受講」の2つを同時に選ぶと、生年月日とクラスの両方が入ります。' },
+    state.editMode
+      ? { id: 'edit', icon: 'edit', label: 'スタッフ編集モードを終了', tone: 'edit',
+        desc: '通常の点数入力の画面に戻ります。' }
+      : { id: 'edit', icon: 'edit', label: 'スタッフ編集モード', tone: 'edit',
+        desc: '過去の記録を修正・削除します。修正すると、級・距離・自己ベストを全記録から計算し直します。' },
+  ];
+  if (other) items.push({ id: 'location', icon: 'swap', label: `${other}教室に切り替え`,
+    desc: `この端末で表示する教室を「${state.location}」から「${other}」に切り替えます。選んだ教室は端末に記憶されます。` });
+  items.push({ id: 'lock', icon: 'lock', label: 'ロックする', tone: 'danger',
+    desc: 'PIN入力画面に戻ります。端末から離れるときは必ずロックしてください。' });
+  openDrawer({
+    title: 'メニュー',
+    sub: `${state.location ? state.location + '教室・' : ''}名簿 ${state.lastSync ? state.lastSync.display : '未同期'}`,
+    footer: `KLAA 進級・スコア管理 v${APP_VERSION}`,
+    items,
+  }, (id, e) => {
+    if (id === 'sync') runRosterSync({});
+    else if (id === 'csv') onCsvSelected(e);
+    else if (id === 'edit') toggleEditMode();
+    else if (id === 'location') switchLocation(other);
+    else if (id === 'lock') logout();
+  });
 }
 
 function refreshList(updateChips = true) {
@@ -337,7 +386,7 @@ function renderChips() {
       <span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}
     </button>`;
   return [
-    chip('all', '全員', state.members.length + '名'),
+    chip('all', '全生徒', state.members.length + '名'),
     ...state.classes.filter((c) => !state.location || c.location === state.location)
       .map((c) => chip(c.name, `${c.dayLabel} ${c.start}`, (counts[c.name] || 0) + '名' + (c.kind && c.kind !== 'ベーシック' ? '・' + c.kind : ''), c.day === today ? 'today' : '')),
     counts['(none)'] ? chip('(none)', 'クラス未設定', counts['(none)'] + '名') : '',
@@ -363,7 +412,7 @@ function renderMembers() {
   const list = visibleMembers();
   const current = state.classes.find((c) => c.name === state.filter.className);
   const heading = current
-    ? `<h2 class="list-heading">${esc(current.name)} <small>${esc(current.start)}〜${esc(current.end)}</small></h2>`
+    ? `<h2 class="list-heading">${esc(current.label)} <small>${esc(current.start)}〜${esc(current.end)}</small></h2>`
     : state.filter.className === '(none)' ? '<h2 class="list-heading">クラス未設定 <small>会員をタップしてクラスを設定できます</small></h2>' : '';
   if (!list.length) return heading + '<p class="empty">該当する会員がいません</p>';
   return heading + '<div class="grid">' + list.map((m) => `
@@ -376,7 +425,7 @@ function renderMembers() {
         ${m.centerRod === 'あり' ? '<span class="tag rod">ロッド</span>' : ''}
       </span>
       ${pbListHtml(m.personalBests, 'member-pbs')}
-      ${state.filter.className === 'all' && m.className ? `<span class="member-class">${esc(m.className)}</span>` : ''}
+      ${state.filter.className === 'all' && m.className ? `<span class="member-class">${esc(classDisplay(m.className))}</span>` : ''}
       ${drafts.get(m.memberId) ? '<span class="draft-dot" title="入力途中のデータがあります"></span>' : ''}
     </button>`).join('') + '</div>';
 }
@@ -385,11 +434,33 @@ function renderMembers() {
  * 会員の入力シート
  * ================================================================== */
 
+/** 保存されているクラス名 → 表示名（例：「【あま】水曜日 ベーシック 16:45」） */
+function classDisplay(name) {
+  const c = state.classes.find((x) => x.name === name);
+  return c ? `${c.label} ${c.start}` : name;
+}
+
+/** クラスの選択（教室ごと・曜日順に並べた独自の選択リスト） */
+async function chooseClass(member) {
+  const groups = state.locations.map((loc) => ({
+    label: loc + '教室',
+    options: state.classes.filter((c) => c.location === loc).map((c) => ({ value: c.name, label: c.label, sub: `${c.start}〜${c.end}` })),
+  })).filter((g) => g.options.length);
+  groups.push({ label: 'その他', options: [{ value: '(none)', label: '未設定にする' }] });
+  // 今の教室を先頭に
+  groups.sort((a, b) => (b.label === state.location + '教室') - (a.label === state.location + '教室'));
+  const picked = await pickOption({ title: `${member.name} の所属クラス`, value: member.className || '(none)', groups });
+  if (picked === null) return null;
+  const value = picked === '(none)' ? '' : picked;
+  if (value === (member.className || '')) return null;
+  return setClass(member, value);
+}
+
 function nextGoalText(member) {
-  if (member.advance) return 'アドバンスコース（自己ベストを記録します）';
+  if (member.advance) return '';
   const current = parseInt(member.grade, 10);
   const rule = state.rules.find((r) => r.grade === (isNaN(current) ? 0 : current) + 1);
-  if (!rule) return '15級合格 ── アドバンスコース推薦状の対象です 🎓';
+  if (!rule) return '15級合格 ── アドバンスコース推薦状の対象です';
   if (rule.kind === 'skill') return `次：${rule.label}（実技テスト：${rule.test}）`;
   const where = rule.star ? '校内記録会' : '点取り';
   if (rule.min !== null) return `次：${rule.label}　${where}・${rule.distance}・${rule.min}点以上`;
@@ -398,13 +469,21 @@ function nextGoalText(member) {
 }
 
 function memberSummaryHtml(member) {
+  const goal = nextGoalText(member);
+  const nav = neighbors(member);
   return `
     <div class="sheet-head">
       <div>
         <h2>${esc(member.name)}</h2>
         <p class="muted">${esc(member.kana)}　${esc(member.memberId)}</p>
       </div>
-      <button type="button" class="close-btn" data-close aria-label="閉じる">✕</button>
+      <div class="sheet-nav">
+        ${nav.total > 1 ? `
+          <button type="button" class="nav-btn" data-nav="-1" aria-label="前の生徒" ${nav.prev ? '' : 'disabled'}>${icon('chevronLeft')}</button>
+          <span class="nav-pos">${nav.index + 1}<small>/${nav.total}</small></span>
+          <button type="button" class="nav-btn" data-nav="1" aria-label="次の生徒" ${nav.next ? '' : 'disabled'}>${icon('chevronRight')}</button>` : ''}
+        <button type="button" class="close-btn" data-close aria-label="閉じる">${icon('close')}</button>
+      </div>
     </div>
     <div class="status-row">
       ${member.advance ? '<span class="tag advance">アドバンス</span>' : `<span class="tag grade large">${esc(member.gradeLabel || member.grade)}</span>`}
@@ -415,7 +494,68 @@ function memberSummaryHtml(member) {
       <span class="pb-title">自己ベスト</span>
       ${pbListHtml(member.personalBests, 'pb-list', true)}
     </div>
-    <p class="goal">${esc(nextGoalText(member))}</p>`;
+    ${goal ? `<p class="goal">${icon(goal.startsWith('次') ? 'target' : 'cap')}<span>${esc(goal)}</span></p>` : ''}`;
+}
+
+/* ------------------------------ 前後の生徒へ移動 ------------------------------ */
+
+/** 一覧に表示中の順番（シートを開いた時点の並び）で前後の生徒を返す */
+function neighbors(member) {
+  const ids = state.navIds || [];
+  const index = ids.indexOf(member.memberId);
+  const find = (id) => (id ? state.members.find((m) => m.memberId === id) : null);
+  if (index < 0) return { index: 0, total: 1, prev: null, next: null };
+  return { index, total: ids.length, prev: find(ids[index - 1]), next: find(ids[index + 1]) };
+}
+
+/**
+ * シートの前後移動（左右ボタン・横スワイプ）
+ * @param {HTMLElement} el シートの中身
+ * @param {Object} member
+ * @param {function(Object, number): void} open 移動先を開く関数（第2引数は向き：1=次、-1=前）
+ */
+function attachMemberNav(el, member, open) {
+  const nav = neighbors(member);
+  const go = (dir) => {
+    const target = dir > 0 ? nav.next : nav.prev;
+    if (target) open(target, dir);
+  };
+  el.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => go(Number(b.dataset.nav))));
+  if (nav.total < 2) return;
+
+  let start = null;
+  let swiped = false;
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' || e.target.closest('input, select, textarea')) return;
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    swiped = false;
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      const blocked = (dx < 0 && !nav.next) || (dx > 0 && !nav.prev);
+      el.style.transform = `translateX(${dx * (blocked ? 0.12 : 0.35)}px)`;
+    }
+  });
+  const end = (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    start = null;
+    el.style.transform = '';
+    if (e.type === 'pointerup' && Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+      swiped = true;
+      go(dx < 0 ? 1 : -1);
+    }
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+  // スワイプの指を離したときに、下にあるボタン（テンキーなど）が押されないようにする
+  el.addEventListener('click', (e) => {
+    if (swiped) { e.stopPropagation(); e.preventDefault(); swiped = false; }
+  }, true);
 }
 
 /** 的ごとの自己ベスト（カード・シート共通） */
@@ -430,7 +570,7 @@ function targetLabel(key) {
   return t ? t.short : '';
 }
 
-function openMember(member) {
+function openMember(member, dir = 0) {
   const draft = drafts.get(member.memberId) || {};
   const form = {
     type: draft.type || state.scoreConfig.entryTypes[0],
@@ -446,13 +586,12 @@ function openMember(member) {
   const el = h(`<div class="member-sheet">
     ${memberSummaryHtml(member)}
     ${nextRule && nextRule.kind === 'skill' ? `<button type="button" class="btn success large" data-skill>実技テスト合格 → ${esc(nextRule.label)}</button>` : ''}
-    <label class="field inline">
+    <div class="field inline">
       <span>所属クラス</span>
-      <select data-class-select>
-        <option value="">（未設定）</option>
-        ${state.classes.map((c) => `<option value="${esc(c.name)}" ${c.name === member.className ? 'selected' : ''}>${esc(c.name)}（${esc(c.start)}〜）</option>`).join('')}
-      </select>
-    </label>
+      <button type="button" class="select-btn" data-class-btn aria-haspopup="dialog">
+        <span data-class-label>${esc(member.className ? classDisplay(member.className) : '未設定')}</span>${icon('chevronDown')}
+      </button>
+    </div>
     <div class="segmented" role="radiogroup" aria-label="入力種別">
       ${state.scoreConfig.entryTypes.map((t) => `<button type="button" role="radio" data-type="${esc(t)}">${esc(t)}</button>`).join('')}
     </div>
@@ -466,13 +605,17 @@ function openMember(member) {
         ${state.targets.map((t) => `<button type="button" role="radio" data-target="${esc(t.key)}" aria-label="${esc(t.key)}"><span class="t-long">${esc(t.key)}</span><span class="t-short">${esc(t.short)}</span></button>`).join('')}
       </div>` : `<span class="target-fixed">${esc(state.basicTarget)}<small>（ベーシック共通）</small></span>`}
     </div>
+    <div class="draft-bar" data-draft-bar hidden>
+      <span><strong>下書き</strong><span data-draft-text></span></span>
+      <button type="button" class="btn small ghost-danger" data-draft-del>${icon('trash')}下書きを削除</button>
+    </div>
     <div class="score-entry">
       <output class="score-display" data-display aria-live="polite"></output>
       <div class="keypad score-pad">
         ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button type="button" data-k="${n}">${n}</button>`).join('')}
         <button type="button" data-k="clear">C</button>
         <button type="button" data-k="0">0</button>
-        <button type="button" data-k="del" aria-label="1文字消す">⌫</button>
+        <button type="button" data-k="del" aria-label="1文字消す">${icon('backspace')}</button>
       </div>
       <div class="statuses">
         ${state.scoreConfig.statuses.map((s) => `<button type="button" class="status-btn" data-status="${esc(s)}">${esc(s)}</button>`).join('')}
@@ -501,8 +644,23 @@ function openMember(member) {
     saveBtn.textContent = !form.status && scoreOk && !form.target ? '的を選んでください'
       : form.type === '校内記録会' ? '校内記録会の記録として保存' : '保存';
     if (form.score && n > state.scoreConfig.max) display.classList.add('invalid'); else display.classList.remove('invalid');
-    if (form.score || form.status) drafts.save(member.memberId, form); else drafts.clear(member.memberId);
+    const hasDraft = !!(form.score || form.status);
+    if (hasDraft) drafts.save(member.memberId, form); else drafts.clear(member.memberId);
+    draftBar.hidden = !hasDraft;
+    if (hasDraft) draftText.textContent = `${form.status || form.score + '点'}・${form.type}・${form.date}（この端末に保存中）`;
   };
+  const draftBar = el.querySelector('[data-draft-bar]');
+  const draftText = el.querySelector('[data-draft-text]');
+  el.querySelector('[data-draft-del]').addEventListener('click', () => {
+    drafts.clear(member.memberId);
+    Object.assign(form, {
+      type: state.scoreConfig.entryTypes[0], date: todayYmd(), score: '', status: '',
+      target: member.advance ? (member.lastTarget || '') : state.basicTarget,
+    });
+    dateInput.value = form.date.replace(/\//g, '-');
+    render();
+    toast(`${member.name}：下書きを削除しました`);
+  });
 
   el.querySelector('.score-pad').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-k]');
@@ -534,8 +692,12 @@ function openMember(member) {
     form.date = dateInput.value ? dateInput.value.replace(/-/g, '/') : todayYmd();
     render();
   });
-  el.querySelector('[data-class-select]').addEventListener('change', (e) => setClass(member, e.target.value));
+  el.querySelector('[data-class-btn]').addEventListener('click', async () => {
+    await chooseClass(member);
+    el.querySelector('[data-class-label]').textContent = member.className ? classDisplay(member.className) : '未設定';
+  });
   el.querySelector('[data-close]').addEventListener('click', () => closeSheet());
+  attachMemberNav(el, member, openMember);
   saveBtn.addEventListener('click', () => submitScore(member, form));
   const skillBtn = el.querySelector('[data-skill]');
   if (skillBtn) skillBtn.addEventListener('click', () => submitSkill(member, nextRule, form.date));
@@ -549,13 +711,24 @@ function openMember(member) {
   });
 
   render();
-  openSheetFor(el);
+  openSheetFor(el, dir);
 }
 
-function openSheetFor(el) {
+/**
+ * シートを開く。dir（1=次・-1=前）を指定し、すでにシートが開いていれば中身だけを入れ替える（横にスライド）
+ */
+function openSheetFor(el, dir = 0) {
+  el.setAttribute('tabindex', '-1');
+  if (dir && state.sheet && state.sheet.el.isConnected) {
+    const box = state.sheet.el.querySelector('.sheet');
+    box.replaceChildren(el);
+    box.scrollTop = 0;
+    el.classList.add(dir > 0 ? 'slide-next' : 'slide-prev');
+    el.focus({ preventScroll: true });
+    return;
+  }
   closeSheet();
   state.sheet = openSheet(el, { onClose: () => { state.sheet = null; refreshListSoft(); } });
-  el.setAttribute('tabindex', '-1');
   el.focus({ preventScroll: true });
 }
 
@@ -571,7 +744,7 @@ async function setClass(member, className) {
   try {
     await withBusy('保存中…', () => call('members.setClass', { memberId: member.memberId, className }));
     member.className = className;
-    toast(className ? `${member.name}：${className} に設定しました` : `${member.name}：クラスを未設定にしました`);
+    toast(className ? `${member.name}：${classDisplay(className)} に設定しました` : `${member.name}：クラスを未設定にしました`);
   } catch (err) {
     alertDialog('クラスを保存できませんでした', err.message);
   }
@@ -660,7 +833,7 @@ function renderUndo() {
   if (!bar) return;
   const u = state.undo;
   if (!u || Date.now() > u.until || state.editMode) { bar.innerHTML = ''; return; }
-  bar.innerHTML = `<button type="button" class="undo-btn"><span aria-hidden="true">↶</span> 直前の入力を取り消す<small>${esc(u.label)}</small></button>`;
+  bar.innerHTML = `<button type="button" class="undo-btn"><span class="undo-main">${icon('undo')}直前の入力を取り消す</span><small>${esc(u.label)}</small></button>`;
   bar.querySelector('button').addEventListener('click', runUndo);
 }
 
@@ -725,7 +898,7 @@ async function toggleEditMode() {
   renderMain();
 }
 
-async function openHistory(member) {
+async function openHistory(member, dir = 0) {
   let data;
   try {
     data = await withBusy('記録を読み込み中…', () => call('history.list', { memberId: member.memberId }));
@@ -748,16 +921,18 @@ async function openHistory(member) {
   el.querySelectorAll('[data-record]').forEach((btn) => {
     btn.addEventListener('click', () => openRecordEditor(member, data.records.find((r) => r.recordId === btn.dataset.record)));
   });
-  openSheetFor(el);
+  attachMemberNav(el, member, openHistory);
+  openSheetFor(el, dir);
 }
 
 function openRecordEditor(member, record) {
-  const statuses = state.scoreConfig.statuses;
+  // 以前のステータス（見学など）の記録は、その値も選べるようにする
+  const statuses = state.scoreConfig.statuses.concat(record.status && state.scoreConfig.statuses.indexOf(record.status) < 0 ? [record.status] : []);
   const isSkill = record.type === '実技テスト';
   const el = h(`<div class="member-sheet">
     <div class="sheet-head">
       <div><h2>記録の修正</h2><p class="muted">${esc(member.name)}　${esc(record.date)}</p></div>
-      <button type="button" class="close-btn" data-close aria-label="閉じる">✕</button>
+      <button type="button" class="close-btn" data-close aria-label="閉じる">${icon('close')}</button>
     </div>
     <form class="stack" data-form>
       <label class="field inline"><span>記録日</span><input type="date" name="date" value="${esc(record.date.replace(/\//g, '-'))}" max="${todayYmd().replace(/\//g, '-')}" required></label>

@@ -6,7 +6,7 @@
  * 非公開モードなどで保存領域が使えない場合も、例外で止まらないようにしている。
  */
 
-export const APP_VERSION = '0.5.0';
+export const APP_VERSION = '0.6.0';
 
 const PREFIX = 'klaa.';
 

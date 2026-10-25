@@ -5,12 +5,13 @@
  * ・API（GAS）への通信には一切関与しない（会員データを端末に保存しない）。
  * ・画面ファイルを変えたら VERSION を上げる。
  */
-const VERSION = 'v0.5.0';
+const VERSION = 'v0.6.0';
 const CACHE = 'klaa-shell-' + VERSION;
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
   './js/app.js', './js/api.js', './js/config.js', './js/session.js', './js/offline.js', './js/ui.js',
-  './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
+  './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/favicon-64.png',
+  './img/klaa-logo.png',
 ];
 
 self.addEventListener('install', (event) => {
