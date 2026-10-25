@@ -17,6 +17,7 @@ const state = {
   classes: [],
   rules: [],
   targets: [],
+  basicTarget: '80cm的',
   scoreConfig: null,
   lastSync: null,
   filter: { className: 'all', query: '' },
@@ -214,6 +215,7 @@ async function startMain() {
     state.classes = data.classes;
     state.rules = data.rules;
     state.targets = data.targets || [];
+    state.basicTarget = data.basicTarget || state.basicTarget;
     state.scoreConfig = data.scoreConfig;
     state.lastSync = data.lastSync;
     state.filter.className = data.suggestedClass || 'all';
@@ -414,7 +416,8 @@ function openMember(member) {
     date: draft.date || todayYmd(),
     score: draft.score || '',
     status: draft.status || '',
-    target: draft.target || member.lastTarget || '',
+    // ベーシックは常に同じ的。的を使い分けるのはアドバンスだけ
+    target: member.advance ? (draft.target || member.lastTarget || '') : state.basicTarget,
   };
   const currentGrade = parseInt(member.grade, 10);
   const nextRule = member.advance ? null : state.rules.find((r) => r.grade === (isNaN(currentGrade) ? 0 : currentGrade) + 1);
@@ -438,9 +441,9 @@ function openMember(member) {
     </label>
     <div class="target-row">
       <span class="target-label">的</span>
-      <div class="segmented targets" role="radiogroup" aria-label="的の種類">
+      ${member.advance ? `<div class="segmented targets" role="radiogroup" aria-label="的の種類">
         ${state.targets.map((t) => `<button type="button" role="radio" data-target="${esc(t.key)}" aria-label="${esc(t.key)}"><span class="t-long">${esc(t.key)}</span><span class="t-short">${esc(t.short)}</span></button>`).join('')}
-      </div>
+      </div>` : `<span class="target-fixed">${esc(state.basicTarget)}<small>（ベーシック共通）</small></span>`}
     </div>
     <div class="score-entry">
       <output class="score-display" data-display aria-live="polite"></output>
@@ -501,7 +504,8 @@ function openMember(member) {
     const b = e.target.closest('[data-type]');
     if (b) { form.type = b.dataset.type; render(); }
   });
-  el.querySelector('.targets').addEventListener('click', (e) => {
+  const targetButtons = el.querySelector('.targets');
+  if (targetButtons) targetButtons.addEventListener('click', (e) => {
     const b = e.target.closest('[data-target]');
     if (b) { form.target = b.dataset.target; render(); }
   });

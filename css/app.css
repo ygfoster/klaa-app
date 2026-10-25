@@ -275,6 +275,8 @@ h1, h2, h3 { margin: 0; line-height: 1.3; }
 .segmented.targets button { font-size: 15px; padding: 0 4px; }
 .segmented.targets button[aria-checked="true"] { background: var(--navy); color: #fff; }
 .target-row.need { box-shadow: 0 0 0 3px var(--danger); }
+.target-fixed { font-weight: 700; padding: 8px 4px; }
+.target-fixed small { font-weight: 500; color: var(--muted); margin-left: 6px; }
 .segmented.targets .t-short { display: none; }
 @media (max-width: 700px) {
   .segmented.targets .t-long { display: none; }
