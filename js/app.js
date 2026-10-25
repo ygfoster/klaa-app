@@ -110,7 +110,7 @@ function renderLock(message) {
   app().innerHTML = `
     <main class="center-screen lock-screen">
       <div class="lock-card">
-        <div class="lock-brand"><img src="img/klaa-logo.png" alt="KLAA"></div>
+        <div class="lock-brand"><img src="img/klaa-logo-white.png" alt="KLAA"></div>
         <h1>進級・スコア管理</h1>
         <p class="muted">スタッフ共通のPINを入力してください<br><small>6桁を入力すると自動でログインします</small></p>
         <div class="pin-dots" aria-label="入力済みの桁数">${'<i></i>'.repeat(6)}</div>
@@ -259,7 +259,7 @@ function renderMain() {
   app().innerHTML = `
     <div class="sticky-head">
     <header class="topbar ${state.editMode ? 'editing' : ''}">
-      <div class="brand"><img src="img/klaa-logo.png" alt="KLAA"></div>
+      <div class="brand"><img src="img/klaa-logo-white.png" alt="KLAA"></div>
       <div class="topbar-title">
         <h1>${state.editMode ? 'スタッフ編集モード' : '進級・スコア管理'}</h1>
         <p class="sync-info">名簿：<span id="last-sync">${esc(state.lastSync ? state.lastSync.display : '未同期')}</span></p>
