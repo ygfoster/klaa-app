@@ -103,7 +103,7 @@ let busyEl = null;
 export async function withBusy(label, fn) {
   busyCount++;
   if (!busyEl) {
-    busyEl = h(`<div class="busy" role="status"><div class="spinner"></div><span></span></div>`);
+    busyEl = h(`<div class="busy" role="status" aria-live="assertive"><div class="busy-card"><div class="spinner"></div><span></span></div></div>`);
     root().appendChild(busyEl);
   }
   busyEl.querySelector('span').textContent = label;

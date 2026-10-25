@@ -5,7 +5,7 @@
  * ・API（GAS）への通信には一切関与しない（会員データを端末に保存しない）。
  * ・画面ファイルを変えたら VERSION を上げる。
  */
-const VERSION = 'v0.3.1';
+const VERSION = 'v0.4.0';
 const CACHE = 'klaa-shell-' + VERSION;
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './css/app.css',

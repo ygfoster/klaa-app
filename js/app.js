@@ -16,6 +16,7 @@ const state = {
   members: [],
   classes: [],
   rules: [],
+  targets: [],
   scoreConfig: null,
   lastSync: null,
   filter: { className: 'all', query: '' },
@@ -212,6 +213,7 @@ async function startMain() {
     state.members = data.members;
     state.classes = data.classes;
     state.rules = data.rules;
+    state.targets = data.targets || [];
     state.scoreConfig = data.scoreConfig;
     state.lastSync = data.lastSync;
     state.filter.className = data.suggestedClass || 'all';
@@ -350,7 +352,7 @@ function renderMembers() {
         ${m.distance ? `<span class="tag">${esc(m.distance)}</span>` : ''}
         ${m.centerRod === 'あり' ? '<span class="tag rod">ロッド</span>' : ''}
       </span>
-      <span class="member-pb">${m.personalBest !== '' && m.personalBest !== null ? `PB <strong>${esc(m.personalBest)}</strong>` : 'PB —'}</span>
+      ${pbListHtml(m.personalBests, 'member-pbs')}
       ${state.filter.className === 'all' && m.className ? `<span class="member-class">${esc(m.className)}</span>` : ''}
       ${drafts.get(m.memberId) ? '<span class="draft-dot" title="入力途中のデータがあります"></span>' : ''}
     </button>`).join('') + '</div>';
@@ -385,9 +387,24 @@ function memberSummaryHtml(member) {
       ${member.advance ? '<span class="tag advance">アドバンス</span>' : `<span class="tag grade large">${esc(member.gradeLabel || member.grade)}</span>`}
       ${member.distance ? `<span class="tag">${esc(member.distance)}</span>` : ''}
       ${member.centerRod ? `<span class="tag ${member.centerRod === 'あり' ? 'rod' : ''}">センターロッド${esc(member.centerRod)}</span>` : ''}
-      <span class="pb">自己ベスト <strong>${member.personalBest !== '' && member.personalBest !== null ? esc(member.personalBest) : '—'}</strong>${member.pbDate ? ` <small>${esc(member.pbDate)}</small>` : ''}</span>
+    </div>
+    <div class="pb-panel">
+      <span class="pb-title">自己ベスト</span>
+      ${pbListHtml(member.personalBests, 'pb-list', true)}
     </div>
     <p class="goal">${esc(nextGoalText(member))}</p>`;
+}
+
+/** 的ごとの自己ベスト（カード・シート共通） */
+function pbListHtml(list, cls, withDate) {
+  if (!list || !list.length) return `<span class="${cls} empty-pb">PB —</span>`;
+  return `<span class="${cls}">${list.map((p) => `
+    <span class="pb-item"><span class="pb-target">${esc(p.label)}</span><strong>${esc(p.score)}</strong>${withDate && p.date ? `<small>${esc(p.date)}</small>` : ''}</span>`).join('')}</span>`;
+}
+
+function targetLabel(key) {
+  const t = state.targets.find((x) => x.key === key);
+  return t ? t.short : '';
 }
 
 function openMember(member) {
@@ -397,6 +414,7 @@ function openMember(member) {
     date: draft.date || todayYmd(),
     score: draft.score || '',
     status: draft.status || '',
+    target: draft.target || member.lastTarget || '',
   };
   const currentGrade = parseInt(member.grade, 10);
   const nextRule = member.advance ? null : state.rules.find((r) => r.grade === (isNaN(currentGrade) ? 0 : currentGrade) + 1);
@@ -418,6 +436,12 @@ function openMember(member) {
       <span>記録日</span>
       <input type="date" data-date max="${todayYmd().replace(/\//g, '-')}">
     </label>
+    <div class="target-row">
+      <span class="target-label">的</span>
+      <div class="segmented targets" role="radiogroup" aria-label="的の種類">
+        ${state.targets.map((t) => `<button type="button" role="radio" data-target="${esc(t.key)}" aria-label="${esc(t.key)}"><span class="t-long">${esc(t.key)}</span><span class="t-short">${esc(t.short)}</span></button>`).join('')}
+      </div>
+    </div>
     <div class="score-entry">
       <output class="score-display" data-display aria-live="polite"></output>
       <div class="keypad score-pad">
@@ -441,13 +465,17 @@ function openMember(member) {
   const render = () => {
     el.querySelectorAll('[data-type]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.type === form.type)));
     el.querySelectorAll('[data-status]').forEach((b) => b.classList.toggle('active', b.dataset.status === form.status));
+    el.querySelectorAll('[data-target]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.target === form.target)));
+    el.querySelector('.target-row').classList.toggle('need', !form.status && !!form.score && !form.target);
     display.innerHTML = form.status
       ? `<span class="status-text">${esc(form.status)}</span>`
-      : form.score ? `${esc(form.score)}<small>点</small>` : '<span class="placeholder">点数を入力</span>';
+      : form.score ? `${esc(form.score)}<small>点${form.target ? '・' + esc(targetLabel(form.target)) : ''}</small>` : '<span class="placeholder">点数を入力</span>';
     const n = Number(form.score);
-    const valid = form.status || (form.score !== '' && n >= state.scoreConfig.min && n <= state.scoreConfig.max);
+    const scoreOk = form.score !== '' && n >= state.scoreConfig.min && n <= state.scoreConfig.max;
+    const valid = form.status || (scoreOk && form.target);
     saveBtn.disabled = !valid;
-    saveBtn.textContent = form.type === '校内記録会' ? '校内記録会の記録として保存' : '保存';
+    saveBtn.textContent = !form.status && scoreOk && !form.target ? '的を選んでください'
+      : form.type === '校内記録会' ? '校内記録会の記録として保存' : '保存';
     if (form.score && n > state.scoreConfig.max) display.classList.add('invalid'); else display.classList.remove('invalid');
     if (form.score || form.status) drafts.save(member.memberId, form); else drafts.clear(member.memberId);
   };
@@ -472,6 +500,10 @@ function openMember(member) {
   el.querySelector('.segmented').addEventListener('click', (e) => {
     const b = e.target.closest('[data-type]');
     if (b) { form.type = b.dataset.type; render(); }
+  });
+  el.querySelector('.targets').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-target]');
+    if (b) { form.target = b.dataset.target; render(); }
   });
   dateInput.addEventListener('change', () => {
     form.date = dateInput.value ? dateInput.value.replace(/-/g, '/') : todayYmd();
@@ -523,13 +555,13 @@ async function setClass(member, className) {
 /* ------------------------------ 保存・Undo ------------------------------ */
 
 function describeEntry(payload) {
-  const value = payload.status || payload.score + '点';
+  const value = payload.status || payload.score + '点' + (payload.target ? '（' + targetLabel(payload.target) + '）' : '');
   return (payload.type === '校内記録会' ? '記録会 ' : '') + value;
 }
 
 async function submitScore(member, form) {
   const payload = { memberId: member.memberId, date: form.date, type: form.type };
-  if (form.status) payload.status = form.status; else payload.score = Number(form.score);
+  if (form.status) payload.status = form.status; else { payload.score = Number(form.score); payload.target = form.target; }
   await sendMutation({ action: 'score.save', payload, requestId: randomId('s-'), label: `${member.name} ${describeEntry(payload)}`, memberName: member.name });
 }
 
@@ -591,8 +623,9 @@ function applyMemberUpdate(updated) {
     gradeLabel: updated.gradeLabel,
     distance: updated.distance,
     centerRod: updated.centerRod,
-    personalBest: updated.personalBest === null ? '' : updated.personalBest,
+    personalBests: updated.personalBests,
     pbDate: updated.pbDate,
+    lastTarget: updated.lastTarget,
   });
   refreshListSoft();
 }
@@ -682,7 +715,7 @@ async function openHistory(member) {
       <li><button type="button" class="history-row" data-record="${esc(r.recordId)}">
         <span class="h-date">${esc(r.date)}</span>
         <span class="h-type">${esc(r.type)}</span>
-        <span class="h-value">${r.score !== null ? `<strong>${esc(r.score)}</strong>点` : esc(r.status)}${r.distance ? ` <small>${esc(r.distance)}</small>` : ''}</span>
+        <span class="h-value">${r.score !== null ? `<strong>${esc(r.score)}</strong>点` : esc(r.status)}${r.target ? ` <small>${esc(targetLabel(r.target))}</small>` : ''}${r.distance ? ` <small>${esc(r.distance)}</small>` : ''}</span>
         <span class="h-badges">${r.isPb ? '<span class="tag pb-tag">PB</span>' : ''}${r.promotedTo ? `<span class="tag grade">→${esc(r.promotedTo)}</span>` : ''}</span>
       </button></li>`).join('')}</ul>` : '<p class="empty">まだ記録がありません</p>'}
   </div>`);
@@ -711,7 +744,9 @@ function openRecordEditor(member, record) {
       <label class="field inline"><span>ステータス</span>
         <select name="status"><option value="">（点数を記録）</option>${statuses.map((s) => `<option ${s === record.status ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label>
       <label class="field inline"><span>距離</span>
-        <select name="distance">${['5m', '8m'].map((d) => `<option ${d === record.distance ? 'selected' : ''}>${d}</option>`).join('')}</select></label>`}
+        <select name="distance">${['5m', '8m'].map((d) => `<option ${d === record.distance ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+      <label class="field inline"><span>的</span>
+        <select name="target"><option value="">（点数のときは必ず選ぶ）</option>${state.targets.map((t) => `<option value="${esc(t.key)}" ${t.key === record.target ? 'selected' : ''}>${esc(t.key)}</option>`).join('')}</select></label>`}
       <label class="field"><span>修正理由（任意）</span><input type="text" name="reason" placeholder="例：入力ミス" autocomplete="off"></label>
       <div class="row-actions">
         <button type="button" class="btn danger" data-delete>この記録を削除</button>
@@ -728,6 +763,7 @@ function openRecordEditor(member, record) {
     if (!isSkill) {
       payload.type = fd.get('type');
       payload.distance = fd.get('distance');
+      payload.target = fd.get('target');
       if (fd.get('status')) { payload.status = fd.get('status'); payload.score = null; } else { payload.score = fd.get('score'); payload.status = ''; }
     }
     if (!(await confirmDialog('本当に編集してもよろしいですか？', '保存すると、この会員の級・距離・自己ベストを全記録から計算し直します。', '編集する', true))) return;
