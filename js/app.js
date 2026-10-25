@@ -36,6 +36,13 @@ function init() {
 
   const fromHash = takeApiUrlFromHash();
   if (fromHash && isValidApiUrl(fromHash)) setApiUrl(fromHash);
+  // アプリを開いたまま設定用リンクを開いた場合（ページは読み直されず # 以降だけ変わる）
+  window.addEventListener('hashchange', () => {
+    const url = takeApiUrlFromHash();
+    if (!url || !isValidApiUrl(url)) return;
+    setApiUrl(url);
+    if (!sessionTimer.isLoggedIn()) renderLock('接続先を設定しました。PINを入力してください。');
+  });
 
   hooks.onSession = (info) => {
     sessionTimer.applyServerSession(info);
