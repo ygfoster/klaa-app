@@ -304,6 +304,8 @@ h1, h2, h3 { margin: 0; line-height: 1.3; }
 .pb-list { display: flex; flex-wrap: wrap; gap: 6px 18px; }
 .pb-list .pb-item strong { font-size: 22px; }
 .pb-list.empty-pb { color: var(--muted); }
+/* 編集モードの一覧：前のコースのときの記録の印 */
+.tag.other-course { background: transparent; color: var(--muted); font-weight: 600; }
 /* 的の選択 */
 .target-row { display: flex; align-items: center; gap: 10px; border-radius: 14px; transition: box-shadow 0.15s; }
 .target-label { font-size: 14px; font-weight: 700; color: var(--muted); flex: none; width: 1.5em; }
@@ -615,6 +617,11 @@ h1, h2, h3 { margin: 0; line-height: 1.3; }
 
 .banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 10px 16px 0; padding: 10px 14px; border-radius: 12px; }
 .banner.warning { background: var(--warning-bg); color: var(--warning-ink); }
+/* 校内記録会モード（今日の入力は、はじめから「校内記録会」） */
+.banner.meet { background: var(--gold); color: #3b2a00; }
+.banner.meet span { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.banner.meet strong { margin-right: 4px; }
+.banner.meet .btn { background: rgba(255, 255, 255, 0.85); color: #3b2a00; border-color: transparent; }
 .banner-actions { display: flex; gap: 8px; }
 
 #undo-bar { position: fixed; left: 0; right: 0; bottom: calc(16px + var(--safe-bottom)); display: flex; justify-content: center; z-index: 20; pointer-events: none; }

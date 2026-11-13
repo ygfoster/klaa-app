@@ -296,6 +296,8 @@ function renderMain() {
       </div>
     </header>
     <div id="pending-banner"></div>
+    ${isMeetDay() && !state.editMode ? `<div class="banner meet"><span>${icon('trophy')}<strong>校内記録会モード</strong>今日の入力は「校内記録会」として記録されます</span>
+      <button type="button" class="btn small" id="btn-meet-off">終了</button></div>` : ''}
     <nav class="filters">
       <label class="search">
         ${icon('search')}
@@ -342,6 +344,8 @@ function renderMain() {
     state.editMode ? openHistory(member) : openMember(member);
   });
   document.getElementById('btn-menu').addEventListener('click', openMenu);
+  const meetOff = document.getElementById('btn-meet-off');
+  if (meetOff) meetOff.addEventListener('click', toggleMeetDay);
   renderUndo();
   scrollActiveChip();
 }
@@ -355,6 +359,32 @@ function switchLocation(to) {
   state.filter.className = state.suggestedClasses[next] || 'all';
   renderMain();
   toast(`${next}教室に切り替えました`);
+}
+
+/* ------------------------------ 校内記録会モード ------------------------------ */
+
+/** 今日が「校内記録会モード」か（端末ごと。日付が変わると自動で終わる） */
+function isMeetDay() {
+  return local.get('meetDay', '') === todayYmd();
+}
+
+/** 入力画面を開いたときに選ばれている入力種別 */
+function defaultEntryType() {
+  return isMeetDay() ? '校内記録会' : state.scoreConfig.entryTypes[0];
+}
+
+async function toggleMeetDay() {
+  if (isMeetDay()) {
+    local.remove('meetDay');
+    renderMain();
+    toast('校内記録会モードを終了しました');
+    return;
+  }
+  const ok = await confirmDialog('校内記録会モード',
+    '今日の入力を、はじめから「校内記録会」として記録します。\n通常レッスンの生徒がいるときは、入力画面で「通常レッスン」に切り替えてください。\n日付が変わると自動で終わります。', '開始する');
+  if (!ok) return;
+  local.set('meetDay', todayYmd());
+  renderMain();
 }
 
 /** 右上のメニュー */
@@ -371,6 +401,11 @@ function openMenu() {
       : { id: 'edit', icon: 'edit', label: 'スタッフ編集モード', tone: 'edit',
         desc: '過去の記録を修正・削除します。修正すると、級・距離・自己ベストを全記録から計算し直します。' },
   ];
+  items.splice(2, 0, isMeetDay()
+    ? { id: 'meet', icon: 'trophy', label: '校内記録会モードを終了',
+      desc: '入力画面の最初の選択を「通常レッスン」に戻します。' }
+    : { id: 'meet', icon: 'trophy', label: '校内記録会モード（今日だけ）',
+      desc: '今日の入力を、はじめから「校内記録会」として記録します。記録会の日に、1人ずつ選び直す手間と選び忘れを防ぎます。' });
   if (other) items.push({ id: 'location', icon: 'swap', label: `${other}教室に切り替え`,
     desc: `この端末で表示する教室を「${state.location}」から「${other}」に切り替えます。選んだ教室は端末に記憶されます。` });
   items.push({ id: 'lock', icon: 'lock', label: 'ロックする', tone: 'danger',
@@ -384,6 +419,7 @@ function openMenu() {
     if (id === 'sync') runRosterSync({});
     else if (id === 'csv') onCsvSelected(e);
     else if (id === 'edit') toggleEditMode();
+    else if (id === 'meet') toggleMeetDay();
     else if (id === 'location') switchLocation(other);
     else if (id === 'lock') logout();
   });
@@ -615,7 +651,7 @@ function targetLabel(key) {
 function openMember(member, dir = 0) {
   const draft = drafts.get(member.memberId) || {};
   const form = {
-    type: draft.type || state.scoreConfig.entryTypes[0],
+    type: draft.type || defaultEntryType(),
     date: draft.date || todayYmd(),
     score: draft.score || '',
     status: draft.status || '',
@@ -701,7 +737,7 @@ function openMember(member, dir = 0) {
   el.querySelector('[data-draft-del]').addEventListener('click', () => {
     drafts.clear(member.memberId);
     Object.assign(form, {
-      type: state.scoreConfig.entryTypes[0], date: todayYmd(), score: '', status: '',
+      type: defaultEntryType(), date: todayYmd(), score: '', status: '',
       target: member.advance ? (member.lastTarget || '') : state.basicTarget,
     });
     dateInput.value = form.date.replace(/\//g, '-');
@@ -995,12 +1031,13 @@ async function openHistory(member, dir = 0) {
   const el = h(`<div class="member-sheet">
     ${memberSummaryHtml(Object.assign({}, member, data.member, { kana: member.kana, advance: member.advance, kids: member.kids, ageCategory: member.ageCategory }))}
     <h3 class="section-title">記録（新しい順）</h3>
+    ${data.records.some((r) => r.otherCourse) ? '<p class="muted small">前のコースのときの記録は、今のコースの自己ベストには数えません。</p>' : ''}
     ${data.records.length ? `<ul class="history">${data.records.map((r) => `
       <li><button type="button" class="history-row" data-record="${esc(r.recordId)}">
         <span class="h-date">${esc(r.date)}</span>
         <span class="h-type">${esc(r.type)}</span>
         <span class="h-value">${r.score !== null ? `<strong>${esc(r.score)}</strong>点` : esc(r.status)}${r.target ? ` <small>${esc(targetLabel(r.target))}</small>` : ''}${r.distance ? ` <small>${esc(r.distance)}</small>` : ''}</span>
-        <span class="h-badges">${r.isPb ? '<span class="tag pb-tag">PB</span>' : ''}${r.promotedTo ? `<span class="tag grade">→${esc(r.promotedTo)}</span>` : ''}</span>
+        <span class="h-badges">${r.isPb ? '<span class="tag pb-tag">PB</span>' : ''}${r.promotedTo ? `<span class="tag grade">→${esc(r.promotedTo)}</span>` : ''}${r.otherCourse ? `<span class="tag other-course">${esc(r.otherCourse)}のときの記録</span>` : ''}</span>
       </button></li>`).join('')}</ul>` : '<p class="empty">まだ記録がありません</p>'}
   </div>`);
   el.querySelector('[data-close]').addEventListener('click', () => closeSheet());
