@@ -8,7 +8,7 @@ import { APP_VERSION, getApiUrl, setApiUrl, isValidApiUrl, takeApiUrlFromHash, g
 import { call, hooks, ApiError, NETWORK_MESSAGE } from './api.js';
 import * as sessionTimer from './session.js';
 import { drafts, pending } from './offline.js';
-import { esc, h, icon, dialog, alertDialog, confirmDialog, toast, withBusy, showEvents, openSheet, openDrawer, pickOption } from './ui.js';
+import { esc, h, icon, dialog, alertDialog, confirmDialog, toast, withBusy, showEvents, openSheet, openDrawer, pickOption, closeAllOverlays } from './ui.js';
 
 const app = () => document.getElementById('app');
 
@@ -39,25 +39,44 @@ function init() {
     navigator.serviceWorker.register('sw.js').catch(() => { /* なくても動作する */ });
   }
 
+  // 初回設定用リンク（…/#api=<URL>）。まだ接続先が無い端末では、そのまま設定する
   const fromHash = takeApiUrlFromHash();
-  if (fromHash && isValidApiUrl(fromHash)) setApiUrl(fromHash);
+  const firstSetup = !!fromHash && isValidApiUrl(fromHash) && !getApiUrl();
+  if (firstSetup) setApiUrl(fromHash);
   // アプリを開いたまま設定用リンクを開いた場合（ページは読み直されず # 以降だけ変わる）
-  window.addEventListener('hashchange', () => {
-    const url = takeApiUrlFromHash();
-    if (!url || !isValidApiUrl(url)) return;
-    setApiUrl(url);
-    if (!sessionTimer.isLoggedIn()) renderLock('接続先を設定しました。PINを入力してください。');
-  });
+  window.addEventListener('hashchange', () => applySetupLink(takeApiUrlFromHash()));
 
-  hooks.onSession = (info) => {
+  hooks.onSession = (info, passive) => {
     sessionTimer.applyServerSession(info);
-    sessionTimer.markServerActivity();
+    if (!passive) sessionTimer.markServerActivity(); // 自動更新（passive）ではサーバー側の時間が延びないので数えない
   };
   hooks.onAuthRequired = (message) => lock(message);
 
   if (!getApiUrl()) renderSetup();
   else if (sessionTimer.isLoggedIn()) resumeSession();
-  else renderLock();
+  else renderLock(firstSetup ? '接続先を設定しました。PINを入力してください。' : '');
+  if (!firstSetup) applySetupLink(fromHash);
+}
+
+/**
+ * 設定用リンクの接続先を反映する。
+ * すでに別の接続先が入っている端末では、必ず確認する（リンクを開いただけで、知らない接続先に差し替わらないように）。
+ */
+async function applySetupLink(url) {
+  if (!url || !isValidApiUrl(url)) return;
+  const current = getApiUrl();
+  if (current === url) return;
+  if (current) {
+    const ok = await confirmDialog('接続先を変更しますか？',
+      'この端末には、すでに接続先が設定されています。\n管理者から受け取ったリンクを開いたときだけ「変更する」を押してください。', '変更する', true);
+    if (!ok) return;
+  }
+  setApiUrl(url);
+  // 接続先が変わったら、前の接続先のログインは使えないので PIN 入力からやり直す
+  sessionTimer.end();
+  hideWarn();
+  state.editMode = false;
+  renderLock(current ? '接続先を変更しました。PINを入力してください。' : '接続先を設定しました。PINを入力してください。');
 }
 
 /** アプリを開き直した（同じタブで再読み込み）場合：トークンが残っていれば続きから */
@@ -106,6 +125,7 @@ function renderSetup(message) {
 
 function renderLock(message) {
   closeSheet();
+  closeAllOverlays(); // 開いていたダイアログ・一覧（生徒の名前や点数）をロック画面に残さない
   let pin = '';
   app().innerHTML = `
     <main class="center-screen lock-screen">
@@ -114,7 +134,7 @@ function renderLock(message) {
         <h1>進級・スコア管理</h1>
         <p class="muted">スタッフ共通のPINを入力してください<br><small>6桁を入力すると自動でログインします</small></p>
         <div class="pin-dots" aria-label="入力済みの桁数">${'<i></i>'.repeat(6)}</div>
-        <p class="error" id="pin-msg" role="alert">${esc(message || '')}</p>
+        <p class="error info" id="pin-msg" role="alert">${esc(message || '')}</p>
         <div class="keypad" id="pin-pad">
           ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button type="button" data-k="${n}">${n}</button>`).join('')}
           <button type="button" data-k="del" aria-label="1文字消す">${icon('backspace')}</button>
@@ -153,6 +173,7 @@ function renderLock(message) {
       await startMain();
     } catch (err) {
       msg.textContent = err.message;
+      msg.classList.remove('info');
       const card = app().querySelector('.lock-card');
       card.classList.remove('shake');
       void card.offsetWidth;
@@ -179,6 +200,7 @@ function renderLock(message) {
 function lock(message) {
   sessionTimer.end();
   hideWarn();
+  state.editMode = false; // 次にログインした人が、気づかずに編集モードのまま使わないように
   renderLock(message || '一定時間操作がなかったため、ロックしました。PINを入力してください。');
 }
 
@@ -186,6 +208,7 @@ async function logout() {
   call('auth.logout').catch(() => {});
   sessionTimer.end();
   hideWarn();
+  state.editMode = false;
   renderLock('ロックしました。');
 }
 
@@ -232,6 +255,7 @@ async function startMain() {
     const saved = local.get('location', '');
     state.location = state.locations.indexOf(saved) >= 0 ? saved : (state.locations[0] || '');
     state.filter.className = state.suggestedClasses[state.location] || data.suggestedClass || 'all';
+    lastListRefresh = Date.now();
     renderMain();
     offerPendingResend();
   } catch (err) {
@@ -393,14 +417,22 @@ function renderChips() {
   ].join('');
 }
 
+function inSelectedClass(m) {
+  if (state.filter.className === 'all') return true;
+  if (state.filter.className === '(none)') return !m.className;
+  return m.className === state.filter.className;
+}
+
+/**
+ * 一覧に出す生徒。
+ * 検索中は、選んでいるクラスに関係なく全生徒から探す（振替で来た別のクラス・別の教室の生徒もすぐ見つかるように）。
+ * 選んでいるクラスの生徒を先に並べる。
+ */
 function visibleMembers() {
   const q = normalizeQuery(state.filter.query);
-  return state.members.filter((m) => {
-    if (state.filter.className === '(none)' && m.className) return false;
-    if (state.filter.className !== 'all' && state.filter.className !== '(none)' && m.className !== state.filter.className) return false;
-    if (!q) return true;
-    return normalizeQuery(m.name + m.kana).includes(q);
-  });
+  if (!q) return state.members.filter(inSelectedClass);
+  const hits = state.members.filter((m) => normalizeQuery(m.name + m.kana).includes(q));
+  return hits.filter(inSelectedClass).concat(hits.filter((m) => !inSelectedClass(m)));
 }
 
 function normalizeQuery(s) {
@@ -410,11 +442,14 @@ function normalizeQuery(s) {
 
 function renderMembers() {
   const list = visibleMembers();
+  const searching = !!normalizeQuery(state.filter.query);
   const current = state.classes.find((c) => c.name === state.filter.className);
-  const heading = current
-    ? `<h2 class="list-heading">${esc(current.label)} <small>${esc(current.start)}〜${esc(current.end)}</small></h2>`
-    : state.filter.className === '(none)' ? '<h2 class="list-heading">クラス未設定 <small>会員をタップしてクラスを設定できます</small></h2>' : '';
-  if (!list.length) return heading + '<p class="empty">該当する会員がいません</p>';
+  const heading = searching
+    ? `<h2 class="list-heading">「${esc(state.filter.query.trim())}」の検索結果 <small>全生徒から ${list.length}名</small></h2>`
+    : current
+      ? `<h2 class="list-heading">${esc(current.label)} <small>${esc(current.start)}〜${esc(current.end)}</small></h2>`
+      : state.filter.className === '(none)' ? '<h2 class="list-heading">クラス未設定 <small>会員をタップしてクラスを設定できます</small></h2>' : '';
+  if (!list.length) return heading + `<p class="empty">${searching ? '見つかりませんでした。名前の一部やふりがなでも探せます。入会したばかりの生徒は、名簿の取り込みが必要です。' : '該当する会員がいません'}</p>`;
   return heading + '<div class="grid">' + list.map((m) => `
     <button type="button" class="member-card" data-member="${esc(m.memberId)}">
       <span class="member-name">${esc(m.name)}</span>
@@ -425,7 +460,7 @@ function renderMembers() {
         ${m.centerRod === 'あり' && !m.kids ? '<span class="tag rod">ロッド</span>' : ''}
       </span>
       ${pbListHtml(m.personalBests, 'member-pbs')}
-      ${state.filter.className === 'all' && m.className ? `<span class="member-class">${esc(classDisplay(m.className))}</span>` : ''}
+      ${(state.filter.className === 'all' || searching) && m.className ? `<span class="member-class">${esc(classDisplay(m.className))}</span>` : ''}
       ${drafts.get(m.memberId) ? '<span class="draft-dot" title="入力途中のデータがあります"></span>' : ''}
     </button>`).join('') + '</div>';
 }
@@ -648,13 +683,18 @@ function openMember(member, dir = 0) {
     const scoreOk = form.score !== '' && n >= state.scoreConfig.min && n <= state.scoreConfig.max;
     const valid = form.status || (scoreOk && form.target);
     saveBtn.disabled = !valid;
+    // 今日以外の日付（前の日の下書きを開いたとき・日付を変えたとき）は、ボタンにも日付を出して気づけるようにする
+    const pastDate = form.date !== todayYmd();
+    const dateLabel = form.date.replace(/^\d+\/0?(\d+)\/0?(\d+)$/, '$1/$2');
     saveBtn.textContent = !form.status && scoreOk && !form.target ? '的を選んでください'
-      : form.type === '校内記録会' ? '校内記録会の記録として保存' : '保存';
+      : form.type === '校内記録会' ? `${pastDate ? dateLabel + ' の' : ''}校内記録会の記録として保存`
+        : pastDate ? `${dateLabel} の記録として保存` : '保存';
+    dateInput.closest('.field').classList.toggle('past-date', pastDate);
     if (form.score && n > state.scoreConfig.max) display.classList.add('invalid'); else display.classList.remove('invalid');
     const hasDraft = !!(form.score || form.status);
     if (hasDraft) drafts.save(member.memberId, form); else drafts.clear(member.memberId);
     draftBar.hidden = !hasDraft;
-    if (hasDraft) draftText.textContent = `${form.status || form.score + '点'}・${form.type}・${form.date}（この端末に保存中）`;
+    if (hasDraft) draftText.textContent = `${form.status || form.score + '点'}・${form.type}・${form.date}${pastDate ? '（今日ではない日付です）' : '（この端末に保存中）'}`;
   };
   const draftBar = el.querySelector('[data-draft-bar]');
   const draftText = el.querySelector('[data-draft-text]');
@@ -753,7 +793,8 @@ async function setClass(member, className) {
     member.className = className;
     toast(className ? `${member.name}：${classDisplay(className)} に設定しました` : `${member.name}：クラスを未設定にしました`);
   } catch (err) {
-    alertDialog('クラスを保存できませんでした', err.message);
+    if (err.code === 'AUTH_REQUIRED') return; // ロックされた（PIN 入力画面に戻っている）
+    alertDialog('クラスを保存できませんでした', err.code === 'NETWORK' ? NETWORK_MESSAGE : err.message, 'warning');
   }
 }
 
@@ -767,7 +808,11 @@ function describeEntry(payload) {
 async function submitScore(member, form) {
   const payload = { memberId: member.memberId, date: form.date, type: form.type };
   if (form.status) payload.status = form.status; else { payload.score = Number(form.score); payload.target = form.target; }
-  await sendMutation({ action: 'score.save', payload, requestId: randomId('s-'), label: `${member.name} ${describeEntry(payload)}`, memberName: member.name });
+  // 通信の失敗で「未送信」に残っている同じ内容があれば、同じ requestId で送り直す（同じ点数が2件にならないように）
+  const twin = pending.list().find((p) => p.action === 'score.save' &&
+    JSON.stringify(Object.assign({}, p.payload, { sameDay: undefined })) === JSON.stringify(payload));
+  await sendMutation(twin || { action: 'score.save', payload, requestId: randomId('s-'), label: `${member.name} ${describeEntry(payload)}`, memberName: member.name });
+  renderPendingBanner();
 }
 
 async function submitSkill(member, rule, date) {
@@ -967,6 +1012,7 @@ function openRecordEditor(member, record) {
   // 以前のステータス（見学など）の記録は、その値も選べるようにする
   const statuses = state.scoreConfig.statuses.concat(record.status && state.scoreConfig.statuses.indexOf(record.status) < 0 ? [record.status] : []);
   const isSkill = record.type === '実技テスト';
+  const hasDistance = !(member.advance || member.kids); // 距離を持つのはベーシックだけ
   const el = h(`<div class="member-sheet">
     <div class="sheet-head">
       <div><h2>記録の修正</h2><p class="muted">${esc(member.name)}　${esc(record.date)}</p></div>
@@ -981,8 +1027,8 @@ function openRecordEditor(member, record) {
         <input type="number" name="score" inputmode="numeric" min="${state.scoreConfig.min}" max="${state.scoreConfig.max}" value="${record.score !== null ? esc(record.score) : ''}" placeholder="（ステータスの場合は空欄）"></label>
       <label class="field inline"><span>ステータス</span>
         <select name="status"><option value="">（点数を記録）</option>${statuses.map((s) => `<option ${s === record.status ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label>
-      <label class="field inline"><span>距離</span>
-        <select name="distance">${['5m', '8m'].map((d) => `<option ${d === record.distance ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+      ${hasDistance ? `<label class="field inline"><span>距離</span>
+        <select name="distance">${['5m', '8m'].map((d) => `<option ${d === record.distance ? 'selected' : ''}>${d}</option>`).join('')}</select></label>` : ''}
       <label class="field inline"><span>的</span>
         <select name="target"><option value="">（点数のときは必ず選ぶ）</option>${state.targets.map((t) => `<option value="${esc(t.key)}" ${t.key === record.target ? 'selected' : ''}>${esc(t.key)}</option>`).join('')}</select></label>`}
       <label class="field"><span>修正理由（任意）</span><input type="text" name="reason" placeholder="例：入力ミス" autocomplete="off"></label>
@@ -1000,7 +1046,7 @@ function openRecordEditor(member, record) {
     const payload = { recordId: record.recordId, date: fd.get('date').replace(/-/g, '/'), reason: fd.get('reason'), confirmed: true };
     if (!isSkill) {
       payload.type = fd.get('type');
-      payload.distance = fd.get('distance');
+      if (hasDistance) payload.distance = fd.get('distance');
       payload.target = fd.get('target');
       if (fd.get('status')) { payload.status = fd.get('status'); payload.score = null; } else { payload.score = fd.get('score'); payload.status = ''; }
     }
@@ -1086,7 +1132,7 @@ async function handleRosterError(err, forceFn) {
   if (err.response && err.response.needsConfirmation) {
     const sample = (err.response.details && err.response.details.sample) || [];
     const go = await dialog({
-      title: '退会扱いの人数が多すぎます',
+      title: err.code === 'MASS_ADDITION' ? '新しく追加される人数が多すぎます' : '退会扱いの人数が多すぎます',
       message: err.message,
       html: sample.length ? `<ul class="warn-list">${sample.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : '',
       tone: 'warning',
@@ -1097,6 +1143,43 @@ async function handleRosterError(err, forceFn) {
   }
   await alertDialog('名簿を更新できませんでした', err.message, 'warning');
 }
+
+/* ================================================================== *
+ * 一覧の自動更新（ほかの端末で入力された級・自己ベストを反映する）
+ * ================================================================== */
+
+const LIST_REFRESH_MS = 3 * 60 * 1000;
+let lastListRefresh = Date.now();
+let listRefreshing = false;
+
+/**
+ * 会員一覧をサーバーの最新の内容にそろえる。
+ * 「操作」とはみなさない呼び出し（passive）なので、15分のロックまでの時間は延びない。
+ */
+async function refreshMembersQuietly() {
+  if (listRefreshing || !sessionTimer.isLoggedIn() || !document.getElementById('members')) return;
+  if (document.visibilityState !== 'visible' || !navigator.onLine) return;
+  listRefreshing = true;
+  try {
+    const data = await call('members.list', {}, { passive: true });
+    lastListRefresh = Date.now();
+    if (JSON.stringify(data.members) === JSON.stringify(state.members)) return;
+    state.members = data.members;
+    // 入力シートやダイアログを開いている間は画面を描き直さない（閉じたときに反映される）
+    if (!state.sheet && !document.querySelector('#overlay-root .scrim') && document.getElementById('members')) refreshList();
+  } catch (e) {
+    /* 通信できないときは次の機会に（ロック切れは api.js が PIN 入力へ戻す） */
+  } finally {
+    listRefreshing = false;
+  }
+}
+
+setInterval(() => {
+  if (Date.now() - lastListRefresh >= LIST_REFRESH_MS) refreshMembersQuietly();
+}, 30 * 1000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && Date.now() - lastListRefresh >= 30 * 1000) refreshMembersQuietly();
+});
 
 /* ================================================================== */
 

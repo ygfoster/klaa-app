@@ -59,7 +59,7 @@ export async function call(action, payload = {}, options = {}) {
     clearTimeout(timer);
   }
 
-  if (json.session) hooks.onSession(json.session);
+  if (json.session) hooks.onSession(json.session, options.passive === true);
   if (!json.ok) {
     if (json.code === 'AUTH_REQUIRED') hooks.onAuthRequired(json.message);
     throw new ApiError(json.code || 'UNKNOWN', json.message || NETWORK_MESSAGE, json);

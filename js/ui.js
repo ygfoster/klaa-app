@@ -86,6 +86,15 @@ export function dialog(opts) {
   });
 }
 
+/**
+ * 開いているダイアログ・シート・メニュー・選択リスト・トーストをすべて閉じる（ロックするときに使う）。
+ * 生徒の名前や点数が、PIN入力画面の上に残らないようにする。
+ */
+export function closeAllOverlays() {
+  root().querySelectorAll('.scrim').forEach((el) => el.remove());
+  hideToast();
+}
+
 export function alertDialog(title, message, tone) {
   return dialog({ title, message, tone, buttons: [{ label: 'OK', value: true, style: 'primary' }] });
 }
@@ -203,7 +212,7 @@ export function showEvents(events, memberName) {
   const done = dialog({
     title: memberName,
     html: `<div class="event-card">${hero}${promo}${list}</div>`,
-    tone: warnings.length ? 'warning' : celebrate ? 'celebrate' : '',
+    tone: 'events ' + (warnings.length ? 'warning' : celebrate ? 'celebrate' : ''),
     buttons: [{ label: warnings.length ? '確認しました' : 'OK', value: true, style: 'primary' }],
   });
   countUp(root().querySelector('.dialog:last-of-type [data-count]') || document.querySelector('[data-count]'));

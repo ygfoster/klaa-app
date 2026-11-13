@@ -136,6 +136,7 @@ h1, h2, h3 { margin: 0; line-height: 1.3; }
 .lock-card { width: min(340px, 100%); text-align: center; }
 .lock-card .muted { color: rgba(255, 255, 255, 0.7); }
 .lock-card .error { color: #ffb4ab; min-height: 3em; font-size: 14px; display: grid; place-items: center; }
+.lock-card .error.info { color: rgba(255, 255, 255, 0.85); font-weight: 500; }
 .lock-card .link { color: rgba(255, 255, 255, 0.75); }
 .pin-dots { display: flex; justify-content: center; gap: 14px; margin: 24px 0 8px; }
 .pin-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.7); transition: background 0.12s; }
@@ -418,6 +419,8 @@ h1, h2, h3 { margin: 0; line-height: 1.3; }
 /* 下書き（入力途中の内容。端末に保存中） */
 .draft-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 8px 8px 8px 14px; border-radius: 12px; background: color-mix(in srgb, var(--gold) 16%, var(--surface)); border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent); font-size: 13px; }
 .draft-bar[hidden] { display: none; }
+/* 記録日が今日ではないとき（前の日の下書き・日付を変えたとき）は目立たせる */
+.field.past-date input { border-color: var(--gold); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 30%, transparent); }
 .draft-bar strong { margin-right: 8px; color: #8a6400; }
 .btn.ghost-danger { display: inline-flex; align-items: center; gap: 6px; background: transparent; border-color: color-mix(in srgb, var(--danger) 45%, transparent); color: var(--danger); }
 @media (prefers-color-scheme: dark) { .draft-bar strong { color: #ffd666; } }
@@ -502,7 +505,9 @@ h1, h2, h3 { margin: 0; line-height: 1.3; }
 .warn-list.same-day { font-size: 16px; color: var(--text); font-weight: 600; }
 .warn-list { margin: 8px 0; padding-left: 1.2em; font-size: 14px; color: var(--muted); }
 
-.dialog.celebrate h2, .dialog.warning h2 { font-size: 15px; font-weight: 600; color: var(--muted); }
+/* 警告のダイアログ（通信の失敗・保存できない など）は上に赤い線。保存後のお知らせ（.events）は中の行で色分けする */
+.dialog.warning:not(.events) { border-top: 6px solid var(--danger); }
+.dialog.events h2 { font-size: 15px; font-weight: 600; color: var(--muted); }
 
 /* 保存後のお知らせ（自己ベスト・進級・案内・警告） */
 .event-card { display: flex; flex-direction: column; }
