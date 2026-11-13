@@ -791,6 +791,9 @@ async function setClass(member, className) {
   try {
     await withBusy('保存中…', () => call('members.setClass', { memberId: member.memberId, className }));
     member.className = className;
+    // 一覧が自動更新で入れ替わっていても、今の一覧のデータにも反映する
+    const current = state.members.find((m) => m.memberId === member.memberId);
+    if (current) current.className = className;
     toast(className ? `${member.name}：${classDisplay(className)} に設定しました` : `${member.name}：クラスを未設定にしました`);
   } catch (err) {
     if (err.code === 'AUTH_REQUIRED') return; // ロックされた（PIN 入力画面に戻っている）
