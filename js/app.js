@@ -1156,6 +1156,7 @@ async function afterRosterResult(result) {
   state.lastSync = result.lastSync;
   const members = await call('members.list');
   state.members = members.members;
+  if (members.classes) applyClasses(members.classes); // 「時間割」シートの変更も、ここで反映する
   renderMain();
   const warnings = (result.warnings || []).map((w) => `<li>${esc(w)}</li>`).join('');
   await dialog({
@@ -1192,6 +1193,13 @@ const LIST_REFRESH_MS = 3 * 60 * 1000;
 let lastListRefresh = Date.now();
 let listRefreshing = false;
 
+/** 時間割（クラスの一覧）を入れ替える。選んでいたクラスが時間割から無くなったときは「全生徒」に戻す */
+function applyClasses(classes) {
+  state.classes = classes;
+  const selected = state.filter.className;
+  if (selected !== 'all' && selected !== '(none)' && !classes.some((c) => c.name === selected)) state.filter.className = 'all';
+}
+
 /**
  * 会員一覧をサーバーの最新の内容にそろえる。
  * 「操作」とはみなさない呼び出し（passive）なので、15分のロックまでの時間は延びない。
@@ -1203,8 +1211,11 @@ async function refreshMembersQuietly() {
   try {
     const data = await call('members.list', {}, { passive: true });
     lastListRefresh = Date.now();
-    if (JSON.stringify(data.members) === JSON.stringify(state.members)) return;
+    // 「時間割」シートでクラスが増えた・時間が変わったときも、開いたままの端末に反映する
+    const classesChanged = !!data.classes && JSON.stringify(data.classes) !== JSON.stringify(state.classes);
+    if (!classesChanged && JSON.stringify(data.members) === JSON.stringify(state.members)) return;
     state.members = data.members;
+    if (classesChanged) applyClasses(data.classes);
     // 入力シートやダイアログを開いている間は画面を描き直さない（閉じたときに反映される）
     if (!state.sheet && !document.querySelector('#overlay-root .scrim') && document.getElementById('members')) refreshList();
   } catch (e) {
